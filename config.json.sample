@@ -1,0 +1,14 @@
+{
+    "token": "<discord-bot-token>",
+    "servers": [{
+        "address": "irc.libera.chat:6667",
+        "nick": "irc_nick_here",
+        "channels": [
+            {
+                "name":"##john-test",
+                "discord_channel":0000000001,
+                "webhook_url":"https://discord.com/api/webhooks/id/token"
+            }
+        ]
+    }]
+}
