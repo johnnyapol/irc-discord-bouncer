@@ -105,7 +105,9 @@ impl EventHandler for Handler {
                                     ctx.http.get_webhook_with_token(id, &token).await.unwrap();
                                 webhook
                                     .execute(&ctx.http, false, |w| {
-                                        w.content(content).username(user)
+                                        w.content(content)
+                                            .username(user)
+                                            .avatar_url("https://i.imgur.com/4amDEwM.jpg")
                                     })
                                     .await;
                             }

@@ -28,8 +28,6 @@ impl IRCSocket {
         self.stream.write_all(irc_message.as_bytes()).await;
     }
 
-    pub async fn send_message(&self, channel: String, message: String) {}
-
     async fn receive_incoming_data(&mut self, line: &mut String) {
         // more here
         self.stream.read_line(line).await;
