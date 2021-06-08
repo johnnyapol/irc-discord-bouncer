@@ -91,7 +91,7 @@ impl IRCSocket {
                                         network: String::from(&self.addr),
                                         state: message::MessageState::INCOMING,
                                         user: get_username_from_blob(split_first)?,
-                                        content: split.collect::<Vec<&str>>().join(" ")
+                                        content: String::from(&split.collect::<Vec<&str>>().join(" ").as_str()[1..])
                                     })?;
                                 }
                                 "TOPIC" => {

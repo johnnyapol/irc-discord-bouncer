@@ -101,7 +101,7 @@ impl EventHandler for Handler {
                                 let token = &discord.webhook_token;
                                 let content = cmd.content;
                                 let user = cmd.user;
-                                let mut webhook =
+                                let webhook =
                                     ctx.http.get_webhook_with_token(id, &token).await.unwrap();
                                 webhook
                                     .execute(&ctx.http, false, |w| {
