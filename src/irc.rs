@@ -25,7 +25,6 @@ async fn process_outgoing_messages(
 
 impl IRCSocket {
     async fn send_raw(&mut self, irc_message: String) {
-        println!("{}", irc_message);
         self.stream.write_all(irc_message.as_bytes()).await;
     }
 
@@ -71,8 +70,6 @@ impl IRCSocket {
 
                     match split_first {
                         "PING" => {
-                            println!("Received PING message, sending PONG");
-
                             match split.next() {
                                 Some(pong) => self.send_raw(format!("PONG {}", pong)).await,
                                 None => bail!(format!(
