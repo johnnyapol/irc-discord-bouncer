@@ -1,13 +1,13 @@
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 use tokio::sync::broadcast::{Receiver, Sender};
 
 use crate::message;
 
-pub struct IRCSocket {
+pub struct IRCSocket<T: AsyncRead + AsyncWrite + std::marker::Unpin> {
     addr: String,
     tls: bool,
-    stream: BufReader<TcpStream>,
+    stream: BufReader<T>,
     tx: Sender<message::BouncerMessage>,
 }
 
@@ -23,7 +23,7 @@ async fn process_outgoing_messages(
     return None;
 }
 
-impl IRCSocket {
+impl<T: AsyncRead + AsyncWrite + std::marker::Unpin> IRCSocket<T> {
     async fn send_raw(&mut self, irc_message: String) {
         self.stream.write_all(irc_message.as_bytes()).await;
     }
@@ -36,6 +36,19 @@ impl IRCSocket {
     pub async fn do_main_loop(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let mut line = String::new();
         let mut rx = self.tx.subscribe();
+
+        let get_username_from_blob = |blob: &str| -> Result<String, Box<dyn std::error::Error>> {
+            let mut chars = match blob.split("!").next() {
+                Some(chars) => chars.chars(),
+                None => bail!(format!(
+                    "get_user_name_from_blob: Unable to parse username from {}",
+                    blob
+                )),
+            };
+
+            chars.next();
+            return Ok(String::from(chars.as_str()));
+        };
 
         loop {
             tokio::select! {
@@ -52,24 +65,10 @@ impl IRCSocket {
                         None => bail!(format!("do_main_loop: Received unexpected empty string.")),
                     };
 
-                    let get_username_from_blob =
-                        |blob: &str| -> Result<String, Box<dyn std::error::Error>> {
-                            let mut chars = match blob.split("!").next() {
-                                Some(chars) => chars.chars(),
-                                None => bail!(format!(
-                                    "get_user_name_from_blob: Unable to parse username from {}",
-                                    blob
-                                )),
-                            };
-
-                            chars.next();
-                            return Ok(String::from(chars.as_str()));
-                        };
-
                     match split_first {
                         "PING" => {
                             match split.next() {
-                                Some(pong) => self.send_raw(format!("PONG {}", pong)).await,
+                                Some(pong) => self.send_raw(format!("PONG {}\r\n", pong)).await,
                                 None => bail!(format!(
                                     "do_main_loop: Received invalid PING message from server {}",
                                     line
@@ -120,7 +119,7 @@ pub async fn connect_to_server(
     channels: Vec<String>,
     use_tls: bool,
     tx: Sender<message::BouncerMessage>,
-) -> Result<IRCSocket, Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error>> {
     if use_tls {
         bail!("TLS is not currently supported!");
     }
@@ -146,10 +145,14 @@ pub async fn connect_to_server(
             .unwrap();
     }
 
-    Ok(IRCSocket {
+    let mut sock = IRCSocket::<TcpStream> {
         addr,
         tls: use_tls,
         stream: reader,
         tx,
-    })
+    };
+
+    sock.do_main_loop().await?;
+
+    Ok(())
 }

@@ -38,11 +38,9 @@ async fn main() {
             }
 
             async move {
-                let mut irc = irc::connect_to_server(server_addr, nick, chans, false, tx_irc)
+                irc::connect_to_server(server_addr, nick, chans, false, tx_irc)
                     .await
                     .unwrap();
-                println!("Connected to chat!");
-                irc.do_main_loop().await;
             }
         });
     }
