@@ -1,7 +1,8 @@
 {
     "token": "<discord-bot-token>",
     "servers": [{
-        "address": "irc.libera.chat:6667",
+        "address": "irc.libera.chat:6697",
+        "tls": true,
         "nick": "irc_nick_here",
         "channels": [
             {

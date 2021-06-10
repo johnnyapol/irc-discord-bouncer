@@ -30,6 +30,7 @@ async fn main() {
             let server_addr = String::from(&server.address);
             let nick = String::from(&server.nick);
             let channels = &server.channels;
+            let use_tls = server.tls;
 
             let mut chans: Vec<String> = Vec::new();
 
@@ -38,7 +39,7 @@ async fn main() {
             }
 
             async move {
-                irc::connect_to_server(server_addr, nick, chans, false, tx_irc)
+                irc::connect_to_server(server_addr, nick, chans, use_tls, tx_irc)
                     .await
                     .unwrap();
             }

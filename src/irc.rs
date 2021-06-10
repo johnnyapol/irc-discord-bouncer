@@ -2,6 +2,8 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader
 use tokio::net::TcpStream;
 use tokio::sync::broadcast::{Receiver, Sender};
 
+use native_tls::TlsConnector;
+
 use crate::message;
 
 pub struct IRCSocket<T: AsyncRead + AsyncWrite + std::marker::Unpin> {
@@ -111,6 +113,24 @@ impl<T: AsyncRead + AsyncWrite + std::marker::Unpin> IRCSocket<T> {
             };
         }
     }
+
+    pub async fn connect(
+        &mut self,
+        nick: String,
+        channels: Vec<String>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        self.send_raw(format!(
+            "NICK {}\r\nUSER irc-discord-bouncer 8 *  : {}\r\n",
+            nick, nick
+        ))
+        .await;
+
+        for channel in channels {
+            self.send_raw(format!("JOIN {}\r\n", channel)).await;
+        }
+        self.do_main_loop().await?;
+        Ok(())
+    }
 }
 
 pub async fn connect_to_server(
@@ -120,39 +140,33 @@ pub async fn connect_to_server(
     use_tls: bool,
     tx: Sender<message::BouncerMessage>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    if use_tls {
-        bail!("TLS is not currently supported!");
-    }
-
     let socket_connection = TcpStream::connect(&addr).await?;
-    let mut reader = BufReader::new(socket_connection);
 
-    reader
-        .write_all(
-            format!(
-                "NICK {}\r\nUSER irc-discord-bouncer 8 *  : {}\r\n",
-                nick, nick
-            )
-            .as_bytes(),
-        )
-        .await
-        .unwrap();
+    if use_tls {
+        let cx = TlsConnector::builder().build()?;
+        let cx = tokio_native_tls::TlsConnector::from(cx);
 
-    for channel in channels {
-        reader
-            .write_all(format!("JOIN {}\r\n", channel).as_bytes())
-            .await
-            .unwrap();
+        let stream = BufReader::new(
+            cx.connect(&addr.split(":").next().unwrap(), socket_connection)
+                .await?,
+        );
+
+        return IRCSocket {
+            addr,
+            tls: use_tls,
+            stream,
+            tx,
+        }
+        .connect(nick, channels)
+        .await;
     }
 
-    let mut sock = IRCSocket::<TcpStream> {
+    return IRCSocket {
         addr,
         tls: use_tls,
-        stream: reader,
+        stream: BufReader::new(socket_connection),
         tx,
-    };
-
-    sock.do_main_loop().await?;
-
-    Ok(())
+    }
+    .connect(nick, channels)
+    .await;
 }

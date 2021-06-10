@@ -38,6 +38,7 @@ pub struct IRCChannel {
 #[derive(Serialize, Deserialize)]
 pub struct IRCServerConfig {
     pub address: String,
+    pub tls: bool,
     pub nick: String,
     pub channels: Vec<IRCChannel>,
 }
