@@ -15,9 +15,10 @@ pub struct IRCSocket<T: AsyncRead + AsyncWrite + std::marker::Unpin> {
 
 async fn process_outgoing_messages(
     rx: &mut Receiver<message::BouncerMessage>,
+    addr: &str,
 ) -> Option<message::BouncerMessage> {
     while let Ok(cmd) = rx.recv().await {
-        if cmd.state == message::MessageState::OUTGOING {
+        if cmd.state == message::MessageState::OUTGOING && cmd.network == addr {
             return Some(cmd);
         }
     }
@@ -38,6 +39,7 @@ impl<T: AsyncRead + AsyncWrite + std::marker::Unpin> IRCSocket<T> {
     pub async fn do_main_loop(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let mut line = String::new();
         let mut rx = self.tx.subscribe();
+        let addr = String::from(&self.addr);
 
         let get_username_from_blob = |blob: &str| -> Result<String, Box<dyn std::error::Error>> {
             let mut chars = match blob.split("!").next() {
@@ -54,9 +56,9 @@ impl<T: AsyncRead + AsyncWrite + std::marker::Unpin> IRCSocket<T> {
 
         loop {
             tokio::select! {
-                x = process_outgoing_messages(&mut rx) => {
+                x = process_outgoing_messages(&mut rx, &addr) => {
                     match x {
-                        Some(cmd) => self.send_raw(format!("PRIVMSG {} :{}\r\n", cmd.channel, cmd.content)).await,
+                        Some(cmd) => self.send_raw(format!("PRIVMSG {} :{}\r\n", cmd.channel, cmd.content.split("\n").collect::<Vec<&str>>().join(" "))).await,
                         None => {}
                     }
                 },
