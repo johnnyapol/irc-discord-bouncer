@@ -17,12 +17,11 @@ async fn process_outgoing_messages(
     rx: &mut Receiver<message::BouncerMessage>,
     addr: &str,
 ) -> Option<message::BouncerMessage> {
-    while let Ok(cmd) = rx.recv().await {
+    if let Ok(cmd) = rx.recv().await {
         if cmd.state == message::MessageState::OUTGOING && cmd.network == addr {
             return Some(cmd);
         }
     }
-
     return None;
 }
 
