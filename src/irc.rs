@@ -143,29 +143,28 @@ pub async fn connect_to_server(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let socket_connection = TcpStream::connect(&addr).await?;
 
-    if use_tls {
-        let cx = TlsConnector::builder().build()?;
-        let cx = tokio_native_tls::TlsConnector::from(cx);
-
-        let stream = BufReader::new(
-            cx.connect(&addr.split(":").next().unwrap(), socket_connection)
-                .await?,
-        );
-
+    if !use_tls {
+        // Can just short-circuit with the existing stream
         return IRCSocket {
             addr,
             tls: use_tls,
-            stream,
+            stream: BufReader::new(socket_connection),
             tx,
         }
         .connect(nick, channels)
         .await;
     }
 
+    let stream = BufReader::new(
+        tokio_native_tls::TlsConnector::from(TlsConnector::builder().build()?)
+            .connect(&addr.split(":").next().unwrap(), socket_connection)
+            .await?,
+    );
+
     return IRCSocket {
         addr,
         tls: use_tls,
-        stream: BufReader::new(socket_connection),
+        stream,
         tx,
     }
     .connect(nick, channels)
