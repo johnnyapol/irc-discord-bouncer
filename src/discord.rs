@@ -2,7 +2,7 @@ use serenity::{
     async_trait,
     model::{
         channel::Message,
-        id::{ChannelId, GuildId},
+        id::{ChannelId, GuildId, UserId},
     },
 };
 use std::sync::atomic::AtomicBool;
@@ -55,13 +55,14 @@ struct Handler {
     irc_tx: Sender<message::BouncerMessage>,
     discord_irc_map: HashMap<ChannelId, IRCServer>,
     irc_discord_map: Arc<HashMap<IRCServer, DiscordChannel>>,
+    discord_user_id: UserId,
 }
 
 #[async_trait]
 impl EventHandler for Handler {
     async fn message(&self, _ctx: Context, msg: Message) {
-        // Don't forward bot messages (avoids infinite loop)
-        if msg.author.bot {
+        // Don't forward messages from non-owner
+        if msg.author.id != self.discord_user_id {
             return;
         }
 
@@ -75,6 +76,7 @@ impl EventHandler for Handler {
                     user: "".to_string(),
                     content: msg.content,
                     state: message::MessageState::OUTGOING,
+                    ping: false,
                 });
             }
             None => {}
@@ -89,6 +91,7 @@ impl EventHandler for Handler {
             let mut rx = self.irc_tx.subscribe();
 
             let irc_discord_map = self.irc_discord_map.clone();
+            let owner_id = self.discord_user_id.clone();
 
             tokio::spawn(async move {
                 while let Ok(cmd) = rx.recv().await {
@@ -100,10 +103,13 @@ impl EventHandler for Handler {
                             Some(discord) => {
                                 let id = discord.webhook_id;
                                 let token = &discord.webhook_token;
-                                let content = cmd.content;
                                 let user = cmd.user;
                                 let webhook =
                                     ctx.http.get_webhook_with_token(id, &token).await.unwrap();
+                                let content = match cmd.ping {
+                                    true => format!("<@{}> {}", owner_id, cmd.content),
+                                    false => cmd.content,
+                                };
                                 webhook
                                     .execute(&ctx.http, false, |w| {
                                         w.content(content)
@@ -140,6 +146,7 @@ fn webhook_from_url(webhook_url: &str) -> Option<DiscordChannel> {
 
 pub async fn discord_init(
     token: &str,
+    discord_user_id: u64,
     servers: Vec<IRCServerConfig>,
     tx: Sender<message::BouncerMessage>,
 ) {
@@ -176,6 +183,7 @@ pub async fn discord_init(
             irc_tx: tx,
             discord_irc_map: discord_irc_map,
             irc_discord_map: Arc::new(irc_discord_map),
+            discord_user_id: UserId::from(discord_user_id),
         })
         .framework(framework)
         .await

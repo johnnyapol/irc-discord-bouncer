@@ -1,5 +1,6 @@
 {
     "token": "<discord-bot-token>",
+    "discord_user_id": <your-account-id>,
     "servers": [{
         "address": "irc.libera.chat:6697",
         "tls": true,

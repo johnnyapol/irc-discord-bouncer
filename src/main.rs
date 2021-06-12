@@ -7,11 +7,11 @@ mod message;
 use tokio::sync::broadcast;
 
 use serde::{Deserialize, Serialize};
-use serde_json::Result;
 
 #[derive(Serialize, Deserialize)]
 struct Config {
     token: String,
+    discord_user_id: u64,
     servers: Vec<discord::IRCServerConfig>,
 }
 
@@ -54,5 +54,5 @@ async fn main() {
         }
     });
 
-    discord::discord_init(&data.token, data.servers, tx_discord).await;
+    discord::discord_init(&data.token, data.discord_user_id, data.servers, tx_discord).await;
 }

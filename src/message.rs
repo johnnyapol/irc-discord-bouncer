@@ -20,6 +20,7 @@ pub struct BouncerMessage {
     pub user: String,
     pub content: String,
     pub state: MessageState,
+    pub ping: bool,
 }
 
 impl Clone for BouncerMessage {
@@ -30,6 +31,7 @@ impl Clone for BouncerMessage {
             user: self.user.clone(),
             content: self.content.clone(),
             state: self.state,
+            ping: self.ping,
         }
     }
 }

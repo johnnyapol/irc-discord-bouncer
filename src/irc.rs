@@ -11,6 +11,7 @@ pub struct IRCSocket<T: AsyncRead + AsyncWrite + std::marker::Unpin> {
     tls: bool,
     stream: BufReader<T>,
     tx: Sender<message::BouncerMessage>,
+    nick: String,
 }
 
 async fn process_outgoing_messages(
@@ -86,12 +87,16 @@ impl<T: AsyncRead + AsyncWrite + std::marker::Unpin> IRCSocket<T> {
 
                             match next_split {
                                 "PRIVMSG" => {
+                                    let channel = split.next().unwrap().to_string();
+                                    let content =  String::from(&split.collect::<Vec<&str>>().join(" ").as_str()[1..]);
+                                    let ping = content.contains(&self.nick);
                                     self.tx.send(message::BouncerMessage{
-                                        channel: split.next().unwrap().to_string(),
+                                        channel,
                                         network: String::from(&self.addr),
                                         state: message::MessageState::INCOMING,
                                         user: get_username_from_blob(split_first)?,
-                                        content: String::from(&split.collect::<Vec<&str>>().join(" ").as_str()[1..])
+                                        content,
+                                        ping
                                     })?;
                                 }
                                 "TOPIC" => {
@@ -100,7 +105,8 @@ impl<T: AsyncRead + AsyncWrite + std::marker::Unpin> IRCSocket<T> {
                                         network: String::from(&self.addr),
                                         state: message::MessageState::INCOMING,
                                         user: get_username_from_blob(split_first)?,
-                                        content:split.collect::<Vec<&str>>().join(" ")
+                                        content:split.collect::<Vec<&str>>().join(" "),
+                                        ping: false
                                     })?;
                                 },
                                 _ => {
@@ -117,12 +123,11 @@ impl<T: AsyncRead + AsyncWrite + std::marker::Unpin> IRCSocket<T> {
 
     pub async fn connect(
         &mut self,
-        nick: String,
         channels: Vec<String>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         self.send_raw(format!(
             "NICK {}\r\nUSER irc-discord-bouncer 8 *  : {}\r\n",
-            nick, nick
+            self.nick, self.nick
         ))
         .await;
 
@@ -150,8 +155,9 @@ pub async fn connect_to_server(
             tls: use_tls,
             stream: BufReader::new(socket_connection),
             tx,
+            nick,
         }
-        .connect(nick, channels)
+        .connect(channels)
         .await;
     }
 
@@ -166,7 +172,8 @@ pub async fn connect_to_server(
         tls: use_tls,
         stream,
         tx,
+        nick,
     }
-    .connect(nick, channels)
+    .connect(channels)
     .await;
 }
