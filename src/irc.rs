@@ -110,7 +110,7 @@ impl<T: AsyncRead + AsyncWrite + std::marker::Unpin> IRCSocket<T> {
                                     })?;
                                 },
                                 _ => {
-                                    println!("{}", line);
+                                    println!("[{}] {}", addr, line);
                                 }
                             }
                         }
