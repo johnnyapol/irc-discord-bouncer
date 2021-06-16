@@ -14,6 +14,8 @@ use serenity::framework::standard::{
     macros::{command, group},
     CommandResult, StandardFramework,
 };
+
+use serenity::utils::Parse;
 use tokio::sync::broadcast::Sender;
 
 use lazy_static::lazy_static;
@@ -60,7 +62,7 @@ struct Handler {
 
 #[async_trait]
 impl EventHandler for Handler {
-    async fn message(&self, _ctx: Context, msg: Message) {
+    async fn message(&self, ctx: Context, msg: Message) {
         // Don't forward messages from non-owner
         if msg.author.id != self.discord_user_id {
             return;
@@ -68,13 +70,39 @@ impl EventHandler for Handler {
 
         println!("Channel id: {}", &msg.channel_id);
 
+        // TODO: need to account for 512 max msg length (510 + \r\n)
+        // with images and stuff this becomes a big deal;
+        let mut content = String::new();
+
+        // Check to see if the messae is a reply
+        // If so, append <name>: to ping them
+        match &msg.message_reference {
+            Some(msg2) => {
+                let msg_ref =
+                    Message::parse(&ctx, &msg, &msg2.message_id.unwrap().as_u64().to_string())
+                        .await
+                        .unwrap();
+                content.push_str(&format!("{}:", msg_ref.author.name));
+            }
+            None => {}
+        }
+
+        content.push_str(&msg.content);
+
+        // append any file attachments to allow for things like image uploads, etc. to be sent
+        let attachments = msg.attachments;
+
+        for attachment in attachments {
+            content.push_str(&format!(" {}", attachment.url));
+        }
+
         match self.discord_irc_map.get(&msg.channel_id) {
             Some(irc) => {
                 self.irc_tx.send(message::BouncerMessage {
                     channel: String::from(&irc.channel),
                     network: String::from(&irc.addr),
                     user: "".to_string(),
-                    content: msg.content,
+                    content: content,
                     state: message::MessageState::OUTGOING,
                     ping: false,
                 });
