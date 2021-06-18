@@ -35,7 +35,11 @@ impl<T: AsyncRead + AsyncWrite + std::marker::Unpin> IRCSocket<T> {
     async fn receive_incoming_data(&mut self, line: &mut String) -> Result<usize, String> {
         // Read from the underlying stream and propogate any errors up
         match self.stream.read_line(line).await {
-            Ok(size) => Ok(size),
+            Ok(size) => {
+                // Drop the CRLF terminator from the end
+                line.truncate(line.len() - 2);
+                Ok(size)
+            }
             Err(e) => Err(format!("{}", e)),
         }
     }
