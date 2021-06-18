@@ -27,13 +27,17 @@ async fn process_outgoing_messages(
 }
 
 impl<T: AsyncRead + AsyncWrite + std::marker::Unpin> IRCSocket<T> {
-    async fn send_raw(&mut self, irc_message: String) {
-        self.stream.write_all(irc_message.as_bytes()).await;
+    async fn send_raw(&mut self, irc_message: &str) -> Result<(), Box<dyn std::error::Error>> {
+        self.stream.write_all(irc_message.as_bytes()).await?;
+        Ok(())
     }
 
-    async fn receive_incoming_data(&mut self, line: &mut String) {
-        // more here
-        self.stream.read_line(line).await;
+    async fn receive_incoming_data(&mut self, line: &mut String) -> Result<usize, String> {
+        // Read from the underlying stream and propogate any errors up
+        match self.stream.read_line(line).await {
+            Ok(size) => Ok(size),
+            Err(e) => Err(format!("{}", e)),
+        }
     }
 
     pub async fn do_main_loop(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -58,11 +62,16 @@ impl<T: AsyncRead + AsyncWrite + std::marker::Unpin> IRCSocket<T> {
             tokio::select! {
                 x = process_outgoing_messages(&mut rx, &addr) => {
                     match x {
-                        Some(cmd) => self.send_raw(format!("PRIVMSG {} :{}\r\n", cmd.channel, cmd.content.split("\n").collect::<Vec<&str>>().join(" "))).await,
+                        Some(cmd) => self.send_raw(&format!("PRIVMSG {} :{}\r\n", cmd.channel, cmd.content.split("\n").collect::<Vec<&str>>().join(" "))).await?,
                         None => {}
                     }
                 },
-                _ = self.receive_incoming_data(&mut line) => {
+                x = self.receive_incoming_data(&mut line) => {
+                    if x.is_err() {
+                        bail!(x.err().unwrap())
+                    }
+
+
                     let mut split = line.split(" ");
                     let split_first = match split.next() {
                         Some(split_f) => split_f,
@@ -72,7 +81,7 @@ impl<T: AsyncRead + AsyncWrite + std::marker::Unpin> IRCSocket<T> {
                     match split_first {
                         "PING" => {
                             match split.next() {
-                                Some(pong) => self.send_raw(format!("PONG {}\r\n", pong)).await,
+                                Some(pong) => self.send_raw(&format!("PONG {}\r\n", pong)).await?,
                                 None => bail!(format!(
                                     "do_main_loop: Received invalid PING message from server {}",
                                     line
@@ -125,14 +134,14 @@ impl<T: AsyncRead + AsyncWrite + std::marker::Unpin> IRCSocket<T> {
         &mut self,
         channels: Vec<String>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        self.send_raw(format!(
+        self.send_raw(&format!(
             "NICK {}\r\nUSER irc-discord-bouncer 8 *  : {}\r\n",
             self.nick, self.nick
         ))
-        .await;
+        .await?;
 
         for channel in channels {
-            self.send_raw(format!("JOIN {}\r\n", channel)).await;
+            self.send_raw(&format!("JOIN {}\r\n", channel)).await?;
         }
         self.do_main_loop().await?;
         Ok(())

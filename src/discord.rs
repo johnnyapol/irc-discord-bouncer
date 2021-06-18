@@ -23,6 +23,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::time::{sleep, Duration};
 
 #[derive(PartialEq, Eq, Hash)]
 struct IRCServer {
@@ -96,18 +97,20 @@ impl EventHandler for Handler {
             content.push_str(&format!(" {}", attachment.url));
         }
 
-        match self.discord_irc_map.get(&msg.channel_id) {
-            Some(irc) => {
-                self.irc_tx.send(message::BouncerMessage {
+        if let Some(irc) = self.discord_irc_map.get(&msg.channel_id) {
+            // TODO: If this method returns an Err, this means we have lost all IRC connections
+            // Need to notify user of this
+            // Also, the message synchronization should be changed to be 1-1 channels, that way we know specifically what failed
+            self.irc_tx
+                .send(message::BouncerMessage {
                     channel: String::from(&irc.channel),
                     network: String::from(&irc.addr),
                     user: "".to_string(),
                     content: content,
                     state: message::MessageState::OUTGOING,
                     ping: false,
-                });
-            }
-            None => {}
+                })
+                .unwrap();
         }
     }
 
@@ -124,29 +127,47 @@ impl EventHandler for Handler {
             tokio::spawn(async move {
                 while let Ok(cmd) = rx.recv().await {
                     if cmd.state == message::MessageState::INCOMING {
-                        match irc_discord_map.get(&IRCServer {
+                        if let Some(discord) = irc_discord_map.get(&IRCServer {
                             addr: cmd.network,
                             channel: cmd.channel,
                         }) {
-                            Some(discord) => {
-                                let id = discord.webhook_id;
-                                let token = &discord.webhook_token;
-                                let user = cmd.user;
-                                let webhook =
-                                    ctx.http.get_webhook_with_token(id, &token).await.unwrap();
-                                let content = match cmd.ping {
-                                    true => format!("<@{}> {}", owner_id, cmd.content),
-                                    false => cmd.content,
-                                };
-                                webhook
+                            let id = discord.webhook_id;
+                            let token = &discord.webhook_token;
+                            let user = cmd.user;
+                            let webhook =
+                                ctx.http.get_webhook_with_token(id, &token).await.unwrap();
+                            let content = match cmd.ping {
+                                true => format!("<@{}> {}", owner_id, cmd.content),
+                                false => cmd.content,
+                            };
+
+                            let mut transmission_attempts = 0;
+
+                            while transmission_attempts < 3 {
+                                match webhook
                                     .execute(&ctx.http, false, |w| {
-                                        w.content(content)
-                                            .username(user)
+                                        w.content(&content)
+                                            .username(&user)
                                             .avatar_url("https://i.imgur.com/4amDEwM.jpg")
                                     })
-                                    .await;
+                                    .await
+                                {
+                                    Ok(_) => {
+                                        break;
+                                    }
+                                    Err(_) => {
+                                        transmission_attempts += 1;
+                                        sleep(Duration::from_millis(100)).await;
+                                    }
+                                }
                             }
-                            None => {
+
+                            // TODO: Should we re-transmit this message?
+                            if transmission_attempts == 3 {
+                                println!("ERROR: Failed to send webhook {}", content);
+                            }
+                        } else {
+                            {
                                 println!("ERROR: Received message from unexpected channel.");
                             }
                         }
