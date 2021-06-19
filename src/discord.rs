@@ -63,6 +63,82 @@ struct Handler {
 
 #[async_trait]
 impl EventHandler for Handler {
+    async fn cache_ready(&self, ctx: Context, _guilds: Vec<GuildId>) {
+        if !self.is_loop_running.load(Ordering::Relaxed) {
+            self.is_loop_running.swap(true, Ordering::Relaxed);
+
+            let ctx = ctx.clone();
+            let mut rx = self.irc_tx.subscribe();
+
+            let irc_discord_map = self.irc_discord_map.clone();
+            let owner_id = self.discord_user_id.clone();
+
+            tokio::spawn(async move {
+                while let Ok(cmd) = rx.recv().await {
+                    if cmd.state == message::MessageState::INCOMING {
+                        if let Some(discord) = irc_discord_map.get(&IRCServer {
+                            addr: cmd.network,
+                            channel: cmd.channel,
+                        }) {
+                            let id = discord.webhook_id;
+                            let token = &discord.webhook_token;
+                            let user = cmd.user;
+                            let webhook =
+                                ctx.http.get_webhook_with_token(id, &token).await.unwrap();
+
+                            let mut content = cmd.content;
+
+                            lazy_static! {
+                                static ref ACTION_RE: Regex =
+                                    Regex::new("\x01ACTION ([^\x01]+)\x01").unwrap();
+                            }
+
+                            // Handle IRC actions (e.g. /me)
+
+                            if let Some(caps) = ACTION_RE.captures(&content) {
+                                content = format!("*{}*", caps.get(1).unwrap().as_str())
+                            }
+
+                            let content = match cmd.ping {
+                                true => format!("<@{}> {}", owner_id, content),
+                                false => content,
+                            };
+
+                            let mut transmission_attempts = 0;
+
+                            while transmission_attempts < 3 {
+                                if let Ok(_) = webhook
+                                    .execute(&ctx.http, false, |w| {
+                                        w.content(&content)
+                                            .username(&user)
+                                            .avatar_url("https://i.imgur.com/4amDEwM.jpg")
+                                    })
+                                    .await
+                                {
+                                    break;
+                                } else {
+                                    {
+                                        transmission_attempts += 1;
+                                        sleep(Duration::from_millis(100)).await;
+                                    }
+                                }
+                            }
+
+                            // TODO: Should we re-transmit this message?
+                            if transmission_attempts == 3 {
+                                println!("ERROR: Failed to send webhook {}", content);
+                            }
+                        } else {
+                            {
+                                println!("ERROR: Received message from unexpected channel.");
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    }
+
     async fn message(&self, ctx: Context, msg: Message) {
         // Don't forward messages from non-owner
         if msg.author.id != self.discord_user_id {
@@ -111,86 +187,6 @@ impl EventHandler for Handler {
                     ping: false,
                 })
                 .unwrap();
-        }
-    }
-
-    async fn cache_ready(&self, ctx: Context, _guilds: Vec<GuildId>) {
-        if !self.is_loop_running.load(Ordering::Relaxed) {
-            self.is_loop_running.swap(true, Ordering::Relaxed);
-
-            let ctx = ctx.clone();
-            let mut rx = self.irc_tx.subscribe();
-
-            let irc_discord_map = self.irc_discord_map.clone();
-            let owner_id = self.discord_user_id.clone();
-
-            tokio::spawn(async move {
-                while let Ok(cmd) = rx.recv().await {
-                    if cmd.state == message::MessageState::INCOMING {
-                        if let Some(discord) = irc_discord_map.get(&IRCServer {
-                            addr: cmd.network,
-                            channel: cmd.channel,
-                        }) {
-                            let id = discord.webhook_id;
-                            let token = &discord.webhook_token;
-                            let user = cmd.user;
-                            let webhook =
-                                ctx.http.get_webhook_with_token(id, &token).await.unwrap();
-
-                            let mut content = cmd.content;
-
-                            lazy_static! {
-                                static ref ACTION_RE: Regex =
-                                    Regex::new("\x01ACTION([^\x01]+)\x01").unwrap();
-                            }
-
-                            // Handle IRC actions (e.g. /me)
-
-                            match ACTION_RE.captures(&content) {
-                                Some(caps) => {
-                                    content = format!("*{}*", caps.get(1).unwrap().as_str().trim())
-                                }
-                                None => {}
-                            }
-
-                            let content = match cmd.ping {
-                                true => format!("<@{}> {}", owner_id, content),
-                                false => content,
-                            };
-
-                            let mut transmission_attempts = 0;
-
-                            while transmission_attempts < 3 {
-                                match webhook
-                                    .execute(&ctx.http, false, |w| {
-                                        w.content(&content)
-                                            .username(&user)
-                                            .avatar_url("https://i.imgur.com/4amDEwM.jpg")
-                                    })
-                                    .await
-                                {
-                                    Ok(_) => {
-                                        break;
-                                    }
-                                    Err(_) => {
-                                        transmission_attempts += 1;
-                                        sleep(Duration::from_millis(100)).await;
-                                    }
-                                }
-                            }
-
-                            // TODO: Should we re-transmit this message?
-                            if transmission_attempts == 3 {
-                                println!("ERROR: Failed to send webhook {}", content);
-                            }
-                        } else {
-                            {
-                                println!("ERROR: Received message from unexpected channel.");
-                            }
-                        }
-                    }
-                }
-            });
         }
     }
 }
