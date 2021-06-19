@@ -136,9 +136,26 @@ impl EventHandler for Handler {
                             let user = cmd.user;
                             let webhook =
                                 ctx.http.get_webhook_with_token(id, &token).await.unwrap();
+
+                            let mut content = cmd.content;
+
+                            lazy_static! {
+                                static ref ACTION_RE: Regex =
+                                    Regex::new("\x01ACTION([^\x01]+)\x01").unwrap();
+                            }
+
+                            // Handle IRC actions (e.g. /me)
+
+                            match ACTION_RE.captures(&content) {
+                                Some(caps) => {
+                                    content = format!("*{}*", caps.get(1).unwrap().as_str().trim())
+                                }
+                                None => {}
+                            }
+
                             let content = match cmd.ping {
-                                true => format!("<@{}> {}", owner_id, cmd.content),
-                                false => cmd.content,
+                                true => format!("<@{}> {}", owner_id, content),
+                                false => content,
                             };
 
                             let mut transmission_attempts = 0;
