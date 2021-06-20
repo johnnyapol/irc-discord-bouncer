@@ -129,9 +129,7 @@ impl EventHandler for Handler {
                                 println!("ERROR: Failed to send webhook {}", content);
                             }
                         } else {
-                            {
-                                println!("ERROR: Received message from unexpected channel.");
-                            }
+                            println!("ERROR: Received message from unexpected channel.");
                         }
                     }
                 }

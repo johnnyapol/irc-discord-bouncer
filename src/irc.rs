@@ -99,7 +99,7 @@ impl<T: AsyncRead + AsyncWrite + std::marker::Unpin> IRCSocket<T> {
                             };
 
                             match next_split {
-                                "PRIVMSG" => {
+                                "PRIVMSG"|"NOTICE" => {
                                     let channel = split.next().unwrap().to_string();
                                     let content =  String::from(&split.collect::<Vec<&str>>().join(" ").as_str()[1..]);
                                     let ping = content.contains(&self.nick);
