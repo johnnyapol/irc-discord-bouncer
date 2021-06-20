@@ -1,3 +1,4 @@
+use std::cmp::min;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 use tokio::sync::broadcast::{Receiver, Sender};
@@ -28,6 +29,7 @@ async fn process_outgoing_messages(
 
 impl<T: AsyncRead + AsyncWrite + std::marker::Unpin> IRCSocket<T> {
     async fn send_raw(&mut self, irc_message: &str) -> Result<(), Box<dyn std::error::Error>> {
+        assert!(irc_message.as_bytes().len() <= 512);
         self.stream.write_all(irc_message.as_bytes()).await?;
         Ok(())
     }
@@ -37,7 +39,7 @@ impl<T: AsyncRead + AsyncWrite + std::marker::Unpin> IRCSocket<T> {
         match self.stream.read_line(line).await {
             Ok(size) => {
                 // Drop the CRLF terminator from the end
-                if size > 1{
+                if size > 1 {
                     line.truncate(line.len() - 2);
                 }
                 Ok(size)
@@ -67,9 +69,24 @@ impl<T: AsyncRead + AsyncWrite + std::marker::Unpin> IRCSocket<T> {
         loop {
             tokio::select! {
                 x = process_outgoing_messages(&mut rx, &addr) => {
-                    match x {
-                        Some(cmd) => self.send_raw(&format!("PRIVMSG {} :{}\r\n", cmd.channel, cmd.content.split("\n").collect::<Vec<&str>>().join(" "))).await?,
-                        None => {}
+                    if let Some(cmd) = x {
+                        // IRC messages can only have a maximum length of 512 bytes per RFC
+                        // If messages exceed this, we need to split them.
+                        let text_to_process = cmd.content.split("\n").collect::<Vec<&str>>().join(" ");
+                        let prefix = format!("PRIVMSG {} :", cmd.channel);
+                        let prefix_len = prefix.len();
+                        let mut curr_len = 0;
+
+                        // Naive split (e.g. 'A"*512-prefix+'bcd' = all As, then bcd)
+                        while curr_len < text_to_process.len() {
+                            // Prepare the next part of the message to be sent
+                            // 512 (max amount) - 2 (\r\n) - prefix_len (PRIVMSG CHANNEL)
+                            // Note: For some reason, 446 appears to be the max we can send on libera chat
+                            let offset = 446 - 2 - prefix_len;
+                            let buffer_to_send = format!("{}{}\r\n", prefix, &text_to_process[curr_len..min(curr_len+offset, text_to_process.len())]);
+                            curr_len += offset;
+                            self.send_raw(&buffer_to_send).await?;
+                        }
                     }
                 },
                 x = self.receive_incoming_data(&mut line) => {
