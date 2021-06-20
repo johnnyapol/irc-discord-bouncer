@@ -37,7 +37,9 @@ impl<T: AsyncRead + AsyncWrite + std::marker::Unpin> IRCSocket<T> {
         match self.stream.read_line(line).await {
             Ok(size) => {
                 // Drop the CRLF terminator from the end
-                line.truncate(line.len() - 2);
+                if size > 1{
+                    line.truncate(line.len() - 2);
+                }
                 Ok(size)
             }
             Err(e) => Err(format!("{}", e)),
