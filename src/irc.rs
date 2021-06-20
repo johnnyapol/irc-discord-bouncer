@@ -6,6 +6,7 @@ use tokio::sync::broadcast::{Receiver, Sender};
 use native_tls::TlsConnector;
 
 use crate::message;
+use base64::encode;
 
 pub struct IRCSocket<T: AsyncRead + AsyncWrite + std::marker::Unpin> {
     addr: String,
@@ -13,6 +14,7 @@ pub struct IRCSocket<T: AsyncRead + AsyncWrite + std::marker::Unpin> {
     stream: BufReader<T>,
     tx: Sender<message::BouncerMessage>,
     nick: String,
+    password: String,
 }
 
 async fn process_outgoing_messages(
@@ -157,11 +159,32 @@ impl<T: AsyncRead + AsyncWrite + std::marker::Unpin> IRCSocket<T> {
         &mut self,
         channels: Vec<String>,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        let sasl_auth = self.password.len() > 0;
+
+        // Authenticate using SASL (only PLAIN is supported for now)
+        // Protocol info based on https://ircv3.net/specs/extensions/sasl-3.1
+        // TODO: handle SASL not being available, switch to nickserv as backup
+        if sasl_auth {
+            self.send_raw("CAP REQ :sasl\r\n").await?;
+        }
+
         self.send_raw(&format!(
-            "NICK {}\r\nUSER irc-discord-bouncer 8 *  : {}\r\n",
+            "NICK {}\r\nUSER discord 8 *  : {}\r\n",
             self.nick, self.nick
         ))
         .await?;
+
+        if sasl_auth {
+            let sasl_plain = encode(format!(
+                "{}\x00{}\x00{}\x00",
+                self.nick, self.nick, self.password
+            ));
+            self.send_raw(&format!(
+                "AUTHENTICATE PLAIN\r\nAUTHENTICATE {}\r\nCAP END\r\n",
+                sasl_plain
+            ))
+            .await?;
+        }
 
         for channel in channels {
             self.send_raw(&format!("JOIN {}\r\n", channel)).await?;
@@ -174,6 +197,7 @@ impl<T: AsyncRead + AsyncWrite + std::marker::Unpin> IRCSocket<T> {
 pub async fn connect_to_server(
     addr: String,
     nick: String,
+    password: String,
     channels: Vec<String>,
     use_tls: bool,
     tx: Sender<message::BouncerMessage>,
@@ -188,6 +212,7 @@ pub async fn connect_to_server(
             stream: BufReader::new(socket_connection),
             tx,
             nick,
+            password,
         }
         .connect(channels)
         .await;
@@ -205,6 +230,7 @@ pub async fn connect_to_server(
         stream,
         tx,
         nick,
+        password,
     }
     .connect(channels)
     .await;

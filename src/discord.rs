@@ -43,6 +43,7 @@ pub struct IRCServerConfig {
     pub address: String,
     pub tls: bool,
     pub nick: String,
+    pub password: Option<String>,
     pub channels: Vec<IRCChannel>,
 }
 
