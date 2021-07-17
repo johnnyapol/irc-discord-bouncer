@@ -44,6 +44,7 @@ pub struct IRCServerConfig {
     pub tls: bool,
     pub nick: String,
     pub password: Option<String>,
+    pub general_webhook: String,
     pub channels: Vec<IRCChannel>,
 }
 
@@ -77,60 +78,68 @@ impl EventHandler for Handler {
             tokio::spawn(async move {
                 while let Ok(cmd) = rx.recv().await {
                     if cmd.state == message::MessageState::INCOMING {
-                        if let Some(discord) = irc_discord_map.get(&IRCServer {
-                            addr: cmd.network,
+                        let mut content = cmd.content;
+                        let mut lookup = IRCServer {
+                            addr: String::from(&cmd.network),
                             channel: cmd.channel,
-                        }) {
-                            let id = discord.webhook_id;
-                            let token = &discord.webhook_token;
-                            let user = cmd.user;
-                            let webhook =
-                                ctx.http.get_webhook_with_token(id, &token).await.unwrap();
+                        };
 
-                            let mut content = cmd.content;
+                        let discord;
+                        let user;
 
-                            lazy_static! {
-                                static ref ACTION_RE: Regex =
-                                    Regex::new("\x01ACTION ([^\x01]+)\x01").unwrap();
-                            }
+                        if let Some(discord2) = irc_discord_map.get(&lookup) {
+                            user = cmd.user;
+                            discord = discord2;
+                        } else {
+                            // Forward to the general channel
+                            lookup.channel = "".to_string();
+                            discord = irc_discord_map.get(&lookup).unwrap();
+                            user = format!("{} on {}", cmd.user, cmd.network);
+                        }
 
-                            // Handle IRC actions (e.g. /me)
+                        let id = discord.webhook_id;
+                        let token = &discord.webhook_token;
+                        let webhook = ctx.http.get_webhook_with_token(id, &token).await.unwrap();
 
-                            if let Some(caps) = ACTION_RE.captures(&content) {
-                                content = format!("*{}*", caps.get(1).unwrap().as_str())
-                            }
+                        lazy_static! {
+                            static ref ACTION_RE: Regex =
+                                Regex::new("\x01ACTION ([^\x01]+)\x01").unwrap();
+                        }
 
-                            let content = match cmd.ping {
-                                true => format!("<@{}> {}", owner_id, content),
-                                false => content,
-                            };
+                        // Handle IRC actions (e.g. /me)
 
-                            let mut transmission_attempts = 0;
+                        if let Some(caps) = ACTION_RE.captures(&content) {
+                            content = format!("*{}*", caps.get(1).unwrap().as_str())
+                        }
 
-                            while transmission_attempts < 3 {
-                                if let Ok(_) = webhook
-                                    .execute(&ctx.http, false, |w| {
-                                        w.content(&content)
-                                            .username(&user)
-                                            .avatar_url("https://i.imgur.com/4amDEwM.jpg")
-                                    })
-                                    .await
+                        content = match cmd.ping {
+                            true => format!("<@{}> {}", owner_id, content),
+                            false => content,
+                        };
+
+                        let mut transmission_attempts = 0;
+
+                        while transmission_attempts < 3 {
+                            if let Ok(_) = webhook
+                                .execute(&ctx.http, false, |w| {
+                                    w.content(&content)
+                                        .username(&user)
+                                        .avatar_url("https://i.imgur.com/4amDEwM.jpg")
+                                })
+                                .await
+                            {
+                                break;
+                            } else {
                                 {
-                                    break;
-                                } else {
-                                    {
-                                        transmission_attempts += 1;
-                                        sleep(Duration::from_millis(100)).await;
-                                    }
+                                    transmission_attempts += 1;
+                                    sleep(Duration::from_millis(100)).await;
                                 }
                             }
+                        }
 
-                            // TODO: Should we re-transmit this message?
-                            if transmission_attempts == 3 {
-                                println!("ERROR: Failed to send webhook {}", content);
-                            }
-                        } else {
-                            println!("ERROR: Received message from unexpected channel.");
+                        // TODO: Should we re-transmit this message?
+                        if transmission_attempts == 3 {
+                            println!("ERROR: Failed to send webhook {}", content);
                         }
                     }
                 }
@@ -145,9 +154,6 @@ impl EventHandler for Handler {
         }
 
         println!("Channel id: {}", &msg.channel_id);
-
-        // TODO: need to account for 512 max msg length (510 + \r\n)
-        // with images and stuff this becomes a big deal;
         let mut content = String::new();
 
         // Check to see if the messae is a reply
@@ -166,9 +172,7 @@ impl EventHandler for Handler {
         content.push_str(&msg.content);
 
         // append any file attachments to allow for things like image uploads, etc. to be sent
-        let attachments = msg.attachments;
-
-        for attachment in attachments {
+        for attachment in msg.attachments {
             content.push_str(&format!(" {}", attachment.url));
         }
 
@@ -236,6 +240,15 @@ pub async fn discord_init(
                 },
             );
         }
+
+        // Add general channel for server-messages, DMs, etc.
+        irc_discord_map.insert(
+            IRCServer {
+                addr: String::from(&server.address),
+                channel: "".to_string(),
+            },
+            webhook_from_url(&server.general_webhook).unwrap(),
+        );
     }
 
     let mut client = Client::builder(token)

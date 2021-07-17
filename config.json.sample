@@ -5,6 +5,7 @@
         "address": "irc.libera.chat:6697",
         "tls": true,
         "nick": "irc_nick_here",
+        "general_webhook":"https://discord.com/api/webhooks/id/token",
         "channels": [
             {
                 "name":"##john-test",
